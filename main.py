@@ -1,21 +1,19 @@
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
-from starlette.middleware.base import BaseHTTPMiddleware
 import uuid
 import time
 
 EMAIL = "25f2005273@ds.study.iitm.ac.in"
 
 # Assigned values
-RATE_LIMIT = 8          # requests
-WINDOW = 10             # seconds
+RATE_LIMIT = 8
+WINDOW = 10  # seconds
 
 # Assigned CORS origin
 ALLOWED_ORIGIN = "https://app-q16y45.example.com"
 
-# Also allow the exam page origin during grading.
-# Replace with the actual origin if your exam specifies one.
+# IITM TDS grader origin
 EXAM_ORIGIN = "https://exam.sanand.workers.dev"
 
 app = FastAPI()
@@ -35,62 +33,40 @@ app.add_middleware(
 )
 
 # -----------------------------
-# Request Context Middleware
-# -----------------------------
-class RequestContextMiddleware(BaseHTTPMiddleware):
-    async def dispatch(self, request: Request, call_next):
-        request_id = request.headers.get("X-Request-ID")
-
-        if not request_id:
-            request_id = str(uuid.uuid4())
-
-        request.state.request_id = request_id
-
-        response = await call_next(request)
-
-        response.headers["X-Request-ID"] = request_id
-        return response
-
-
-# -----------------------------
-# Rate Limiter Middleware
+# Rate limit storage
 # -----------------------------
 client_requests = {}
 
+# -----------------------------
+# Combined Middleware
+# -----------------------------
+@app.middleware("http")
+async def request_context_and_rate_limit(request: Request, call_next):
+    # Request ID
+    request_id = request.headers.get("X-Request-ID") or str(uuid.uuid4())
+    request.state.request_id = request_id
 
-class RateLimitMiddleware(BaseHTTPMiddleware):
-    async def dispatch(self, request: Request, call_next):
-        client_id = request.headers.get("X-Client-Id", "anonymous")
+    # Rate limiting
+    client_id = request.headers.get("X-Client-Id", "anonymous")
+    now = time.time()
 
-        now = time.time()
+    timestamps = client_requests.get(client_id, [])
+    timestamps = [t for t in timestamps if now - t < WINDOW]
 
-        if client_id not in client_requests:
-            client_requests[client_id] = []
-
-        timestamps = [
-            t
-            for t in client_requests[client_id]
-            if now - t < WINDOW
-        ]
-
-        if len(timestamps) >= RATE_LIMIT:
-            return JSONResponse(
-                status_code=429,
-                content={"detail": "Rate limit exceeded"},
-            )
-
+    if len(timestamps) >= RATE_LIMIT:
+        response = JSONResponse(
+            status_code=429,
+            content={"detail": "Rate limit exceeded"},
+        )
+    else:
         timestamps.append(now)
         client_requests[client_id] = timestamps
-
         response = await call_next(request)
-        return response
 
+    # ALWAYS send the request ID back
+    response.headers["X-Request-ID"] = request_id
 
-# Order:
-# Request Context -> Rate Limit -> Endpoint
-app.add_middleware(RateLimitMiddleware)
-app.add_middleware(RequestContextMiddleware)
-
+    return response
 
 # -----------------------------
 # Endpoint
