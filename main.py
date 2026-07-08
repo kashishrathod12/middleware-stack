@@ -16,7 +16,7 @@ ALLOWED_ORIGIN = "https://app-q16y45.example.com"
 
 # Also allow the exam page origin during grading.
 # Replace with the actual origin if your exam specifies one.
-EXAM_ORIGIN = "https://exam.example.com"
+EXAM_ORIGIN = "https://exam.sanand.workers.dev"
 
 app = FastAPI()
 
